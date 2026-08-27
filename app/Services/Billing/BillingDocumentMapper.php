@@ -5,11 +5,78 @@ namespace App\Services\Billing;
 use App\Exceptions\Billing\BillingValidationException;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\OrderPayment;
 use App\Support\Billing\DocumentKind;
+use App\Support\Billing\PaymentCondition;
 
 final class BillingDocumentMapper
 {
     /**
+     * @return array<string, mixed>
+     */
+    public function fromPayment(
+        Order $order,
+        OrderPayment $payment,
+        string $kind,
+        ?string $series = null,
+        string $paymentCondition = PaymentCondition::CASH,
+    ): array {
+        $order->loadMissing(['customer', 'details.product']);
+        $customer = $order->customer;
+        if ($customer === null) {
+            throw new BillingValidationException('El pedido no tiene cliente asociado.');
+        }
+
+        $recipient = $this->mapRecipient($customer, $kind);
+        $concept = trim((string) ($payment->concept ?: sprintf('Pago pedido %s', $order->order_number)));
+        $amount = round((float) $payment->amount, 2);
+        if ($amount <= 0) {
+            throw new BillingValidationException('El monto del pago debe ser mayor a cero para emitir.');
+        }
+
+        $unitValue = round($amount / 1.18, 6);
+        $items = [[
+            'code' => 'PAY-'.$payment->id,
+            'description' => $concept,
+            'quantity' => 1,
+            'unitCode' => 'NIU',
+            'unitValue' => $unitValue,
+            'taxInclusiveUnitPrice' => $amount,
+            'discount' => 0,
+            'taxAffectation' => '10',
+        ]];
+
+        return [
+            'series' => $series,
+            'recipient' => $recipient,
+            'currency' => 'PEN',
+            'operationType' => '0101',
+            'paymentForm' => PaymentCondition::normalize($paymentCondition),
+            'observation' => $order->observations,
+            'externalSystem' => (string) config('services.billing.external_system'),
+            'externalEntity' => 'order_payment',
+            'externalId' => (string) $payment->id,
+            'externalReference' => sprintf('%s/payment-%d', $order->order_number, $payment->id),
+            'requestedBy' => 'erp',
+            'issueDate' => optional($payment->payment_date)?->toDateString()
+                ?? optional($order->order_date)?->toDateString(),
+            'items' => $items,
+            'snapshot' => [
+                'order_id' => $order->id,
+                'order_number' => $order->order_number,
+                'order_payment_id' => $payment->id,
+                'payment_amount' => $amount,
+                'concept' => $concept,
+                'customer_id' => $customer->id,
+                'recipient' => $recipient,
+                'items' => $items,
+            ],
+        ];
+    }
+
+    /**
+     * Compatibilidad: emite por el total del pedido (flujo legado).
+     *
      * @return array<string, mixed>
      */
     public function fromOrder(Order $order, string $kind, ?string $series = null): array
@@ -28,7 +95,7 @@ final class BillingDocumentMapper
             'recipient' => $recipient,
             'currency' => 'PEN',
             'operationType' => '0101',
-            'paymentForm' => 'cash',
+            'paymentForm' => PaymentCondition::CASH,
             'observation' => $order->observations,
             'externalSystem' => (string) config('services.billing.external_system'),
             'externalEntity' => 'order',

@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\User;
 use App\Support\Audit\AuditUserPresenter;
+use App\Support\Customers\PhoneNormalizer;
 use App\Support\Query\ListQuery;
 use App\Support\Query\SearchablePaginator;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -94,7 +95,9 @@ class CustomerService
             'ruc' => $data['ruc'] ?? null,
             'legal_name' => $data['legal_name'] ?? null,
             'address' => $data['address'] ?? null,
-            'phone_number' => $data['phone_number'] ?? null,
+            'phone_number' => isset($data['phone_number'])
+                ? PhoneNormalizer::canonical((string) $data['phone_number'])
+                : null,
             'city' => $data['city'] ?? null,
             'agency_destination' => $data['agency_destination'] ?? null,
         ];

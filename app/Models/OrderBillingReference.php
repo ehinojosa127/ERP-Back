@@ -9,6 +9,7 @@ class OrderBillingReference extends Model
 {
     protected $fillable = [
         'order_id',
+        'order_payment_id',
         'document_kind',
         'origin',
         'billing_document_id',
@@ -22,6 +23,11 @@ class OrderBillingReference extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function payment(): BelongsTo
+    {
+        return $this->belongsTo(OrderPayment::class, 'order_payment_id');
     }
 
     public function salesNote(): BelongsTo

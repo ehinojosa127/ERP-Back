@@ -15,7 +15,10 @@ use App\Models\OrderPayment;
 use App\Services\Billing\OrderBillingService;
 use App\Services\Orders\OrderService;
 use App\Support\Auth\PermissionGate;
+use App\Events\OrderReadyForPickup;
+use App\Support\Billing\PaymentCondition;
 use App\Support\Orders\OrderStatus;
+use App\Support\Orders\ShipmentStatus;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -61,30 +64,11 @@ class OrderController extends ApiController
             $request->user(),
         );
 
-        $billing = null;
-        $billingError = null;
-        $documentKind = $request->validated('document_kind');
-        if (filled($documentKind)) {
-            try {
-                $this->permissionGate->assert($request, 'billing.issue');
-                $billing = $this->orderBillingService->issueFromOrder(
-                    $order,
-                    $documentKind,
-                    $request->user(),
-                    $request->validated('series'),
-                );
-                $order = $this->orderService->find($order);
-            } catch (BillingException $exception) {
-                $billingError = $exception->getMessage();
-            }
-        }
-
-        return response()->json([
-            'message' => 'Pedido creado correctamente.',
-            'data' => $order,
-            'billing' => $billing,
-            'billing_error' => $billingError,
-        ], 201);
+        return $this->success(
+            $this->orderService->find($order),
+            'Pedido creado correctamente.',
+            201,
+        );
     }
 
     public function update(UpdateOrderRequest $request, Order $order): JsonResponse
@@ -152,13 +136,51 @@ class OrderController extends ApiController
             $data['receipt_file'] = $request->file('receipt_file');
         }
 
+        $remainingBefore = (float) $order->remaining_amount;
+
         $payment = $this->orderService->createPayment(
             $order,
             $data,
             $request->user(),
         );
 
-        return $this->success($payment, 'Pago registrado correctamente.', 201);
+        $billing = null;
+        $billingError = null;
+        $emit = (bool) ($data['emit_document'] ?? false);
+
+        if ($emit) {
+            try {
+                $this->permissionGate->assert($request, 'billing.issue');
+                $billing = $this->orderBillingService->issueFromPayment(
+                    $order,
+                    $payment,
+                    $data['document_kind'],
+                    $request->user(),
+                    $data['series'] ?? null,
+                    $data['payment_condition'] ?? PaymentCondition::CASH,
+                );
+                $payment = $payment->fresh(['billingReference']) ?? $payment;
+            } catch (BillingException $exception) {
+                $billingError = $exception->getMessage();
+            }
+        }
+
+        $orderFresh = $this->orderService->find($order);
+        if (
+            $remainingBefore > 0.00001
+            && (float) $orderFresh->remaining_amount <= 0.00001
+            && $orderFresh->shipment?->status === ShipmentStatus::AT_DESTINATION
+        ) {
+            event(new OrderReadyForPickup($orderFresh));
+        }
+
+        return $this->success([
+            'payment' => $payment,
+            'order' => $orderFresh,
+            'billing' => $billing,
+            'billing_error' => $billingError,
+            'suggested_concept' => $payment->concept,
+        ], 'Pago registrado correctamente.', 201);
     }
 
     public function downloadPaymentReceipt(

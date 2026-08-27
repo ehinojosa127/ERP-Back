@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class OrderPayment extends Model
 {
@@ -12,12 +13,14 @@ class OrderPayment extends Model
 
     protected $fillable = [
         'amount',
+        'concept',
         'payment_method',
         'payment_date',
         'operation_number',
         'receipt_file_path',
         'receipt_file_name',
         'receipt_file_mime',
+        'billing_emission_status',
         'order_id',
         'created_by',
         'updated_by',
@@ -35,6 +38,11 @@ class OrderPayment extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function billingReference(): HasOne
+    {
+        return $this->hasOne(OrderBillingReference::class, 'order_payment_id');
     }
 
     public function createdBy(): BelongsTo

@@ -98,9 +98,15 @@ class Order extends Model
         return $this->hasOne(Shipment::class);
     }
 
+    /** Comprobante más reciente (compatibilidad). Preferir billingReferences(). */
     public function billingReference(): HasOne
     {
-        return $this->hasOne(OrderBillingReference::class);
+        return $this->hasOne(OrderBillingReference::class)->latestOfMany();
+    }
+
+    public function billingReferences(): HasMany
+    {
+        return $this->hasMany(OrderBillingReference::class);
     }
 
     public function createdBy(): BelongsTo

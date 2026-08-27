@@ -5,6 +5,7 @@ namespace App\Services\Billing;
 use App\Exceptions\Billing\BillingValidationException;
 use App\Models\Order;
 use App\Models\OrderBillingReference;
+use App\Models\OrderPayment;
 use App\Models\SalesNote;
 use App\Models\User;
 use App\Support\Billing\DocumentKind;
@@ -18,6 +19,64 @@ final class SalesNoteService
         private readonly BillingDocumentMapper $mapper,
     ) {}
 
+    public function issueFromPayment(Order $order, OrderPayment $payment, User $author): SalesNote
+    {
+        $order->loadMissing(['customer', 'details.product']);
+        if ($order->customer === null) {
+            throw new BillingValidationException('El pedido no tiene cliente asociado.');
+        }
+
+        return DB::transaction(function () use ($order, $payment, $author) {
+            $number = $this->nextNumber();
+            $concept = trim((string) ($payment->concept ?: sprintf('Pago pedido %s', $order->order_number)));
+            $amount = round((float) $payment->amount, 2);
+            $items = [[
+                'product_id' => null,
+                'description' => $concept,
+                'product_name' => $concept,
+                'quantity' => 1,
+                'unit_price' => $amount,
+                'unit_value' => $amount,
+                'total' => $amount,
+                'subtotal' => $amount,
+            ]];
+
+            $note = SalesNote::query()->create([
+                'series' => self::SERIES,
+                'number' => $number,
+                'full_number' => sprintf('%s-%05d', self::SERIES, $number),
+                'issue_date' => optional($payment->payment_date)?->toDateString()
+                    ?? optional($order->order_date)?->toDateString()
+                    ?? now()->toDateString(),
+                'order_id' => $order->id,
+                'customer_id' => $order->customer_id,
+                'customer_name' => trim($order->customer->name.' '.$order->customer->lastname),
+                'customer_document' => $order->customer->dni ?: $order->customer->ruc,
+                'subtotal' => $amount,
+                'total' => $amount,
+                'status' => 'ISSUED',
+                'observations' => $order->observations,
+                'items_snapshot' => $items,
+                'created_by' => $author->id,
+            ]);
+
+            OrderBillingReference::query()->create([
+                'order_id' => $order->id,
+                'order_payment_id' => $payment->id,
+                'document_kind' => DocumentKind::SALES_NOTE,
+                'origin' => 'internal',
+                'sales_note_id' => $note->id,
+                'series' => $note->series,
+                'number' => $note->number,
+                'full_number' => $note->full_number,
+                'idempotency_key' => sprintf('erp:payment:%d:sales_note:v1', $payment->id),
+            ]);
+
+            return $note;
+        });
+    }
+
+    /** @deprecated Preferir issueFromPayment */
     public function issueFromOrder(Order $order, User $author): SalesNote
     {
         $order->loadMissing(['customer', 'details.product']);

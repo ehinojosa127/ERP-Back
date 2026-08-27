@@ -6,6 +6,7 @@ use App\Http\Requests\Billing\IssueOrderDocumentRequest;
 use App\Models\Order;
 use App\Services\Billing\OrderBillingService;
 use App\Support\Auth\PermissionGate;
+use App\Support\Billing\PaymentCondition;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -40,6 +41,8 @@ class OrderBillingController extends ApiController
             $validated['document_kind'],
             $request->user(),
             $validated['series'] ?? null,
+            isset($validated['payment_id']) ? (int) $validated['payment_id'] : null,
+            $validated['payment_condition'] ?? PaymentCondition::CASH,
         );
 
         $alreadyIssued = filled($result['warning'] ?? null);

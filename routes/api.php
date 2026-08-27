@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Api\AttributeController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\Automation\CustomerAutomationController;
+use App\Http\Controllers\Api\Automation\OrderAutomationController;
+use App\Http\Controllers\Api\Automation\ProductAutomationController;
 use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CustomerController;
@@ -35,6 +38,44 @@ Route::prefix('auth')->group(function () {
             ->middleware('permission:account.update');
     });
 });
+
+Route::prefix('automation')
+    ->middleware([
+        'automation.api_key',
+        'throttle:automation',
+        \App\Http\Middleware\AutomationRequestLogMiddleware::class,
+    ])
+    ->group(function () {
+        Route::get('customers/by-phone/{phone}', [CustomerAutomationController::class, 'byPhone'])
+            ->where('phone', '[^/]+');
+        Route::get('customers/by-phone/{phone}/summary', [CustomerAutomationController::class, 'summary'])
+            ->where('phone', '[^/]+');
+        Route::get('customers/by-phone/{phone}/orders', [CustomerAutomationController::class, 'orders'])
+            ->where('phone', '[^/]+');
+        Route::get('customers/by-phone/{phone}/orders/{orderNumber}', [CustomerAutomationController::class, 'order'])
+            ->where('phone', '[^/]+')
+            ->where('orderNumber', '[A-Za-z0-9\-]+');
+        Route::get('customers/by-phone/{phone}/balance', [CustomerAutomationController::class, 'balance'])
+            ->where('phone', '[^/]+');
+        Route::get('customers/by-phone/{phone}/shipments', [CustomerAutomationController::class, 'shipments'])
+            ->where('phone', '[^/]+');
+        Route::get('customers/by-phone/{phone}/orders/{orderNumber}/shipment', [CustomerAutomationController::class, 'shipment'])
+            ->where('phone', '[^/]+')
+            ->where('orderNumber', '[A-Za-z0-9\-]+');
+        Route::get('customers/by-phone/{phone}/orders/{orderNumber}/billing-documents', [CustomerAutomationController::class, 'billingDocuments'])
+            ->where('phone', '[^/]+')
+            ->where('orderNumber', '[A-Za-z0-9\-]+');
+        Route::get('customers/by-phone/{phone}/billing-documents/{documentId}/pdf', [CustomerAutomationController::class, 'billingPdf'])
+            ->where('phone', '[^/]+')
+            ->where('documentId', '[A-Za-z0-9\-]+');
+        Route::post('customers', [CustomerAutomationController::class, 'store']);
+
+        Route::get('products', [ProductAutomationController::class, 'index']);
+        Route::get('products/available', [ProductAutomationController::class, 'available']);
+        Route::get('products/{product}/stock', [ProductAutomationController::class, 'stock']);
+
+        Route::post('orders', [OrderAutomationController::class, 'store']);
+    });
 
 Route::middleware('auth:api')->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])

@@ -35,5 +35,9 @@
         <env name="BILLING_SERVICE_URL" value="http://billing.test"/>
         <env name="BILLING_SERVICE_API_KEY" value="test-key"/>
         <env name="BILLING_SERVICE_TIMEOUT" value="2"/>
+        <env name="AUTOMATION_API_KEY" value="test-automation-key"/>
+        <env name="AUTOMATION_RATE_LIMIT_PER_MINUTE" value="120"/>
+        <env name="N8N_WEBHOOK_URL" value="http://n8n.test/webhook"/>
+        <env name="N8N_WEBHOOK_SECRET" value="test-webhook-secret"/>
     </php>
 </phpunit>

@@ -42,4 +42,14 @@ return [
         'external_system' => env('BILLING_EXTERNAL_SYSTEM', 'confecciones-erika-erp'),
     ],
 
+    'automation' => [
+        'api_key' => env('AUTOMATION_API_KEY', ''),
+        'rate_limit_per_minute' => (int) env('AUTOMATION_RATE_LIMIT_PER_MINUTE', 120),
+    ],
+
+    'n8n' => [
+        'webhook_url' => env('N8N_WEBHOOK_URL', ''),
+        'webhook_secret' => env('N8N_WEBHOOK_SECRET', ''),
+    ],
+
 ];

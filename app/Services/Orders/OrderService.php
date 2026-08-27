@@ -9,6 +9,7 @@ use App\Models\OrderPayment;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Services\Billing\PaymentConceptSuggester;
 use App\Support\Inventory\MovementReferenceType;
 use App\Support\Inventory\MovementType;
 use App\Support\Inventory\PaymentReceiptStorage;
@@ -103,8 +104,11 @@ class OrderService
                 'details.product.details.attribute',
                 'details.supplier',
                 'payments.createdBy',
+                'payments.billingReference',
                 'shipment',
                 'billingReference.salesNote',
+                'billingReferences.salesNote',
+                'billingReferences.payment',
             ])
             ->firstOrFail();
 
@@ -172,9 +176,9 @@ class OrderService
 
     public function delete(Order $order): void
     {
-        $order->loadMissing('billingReference');
+        $order->loadMissing('billingReferences');
 
-        if ($order->billingReference !== null) {
+        if ($order->billingReferences->isNotEmpty()) {
             throw ValidationException::withMessages([
                 'order' => ['No se puede eliminar un pedido con comprobante. Cancélalo para conservarlo en el historial.'],
             ]);
@@ -218,7 +222,7 @@ class OrderService
 
     public function listPayments(Order $order, ListQuery $query): LengthAwarePaginator
     {
-        $builder = $order->payments()->getQuery()->orderByDesc('created_at');
+        $builder = $order->payments()->with('billingReference')->getQuery()->orderByDesc('created_at');
 
         return SearchablePaginator::paginate($builder, $query, []);
     }
@@ -226,7 +230,11 @@ class OrderService
     public function createPayment(Order $order, array $data, User $author): OrderPayment
     {
         return DB::transaction(function () use ($order, $data, $author) {
-            $locked = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $locked = Order::query()
+                ->whereKey($order->id)
+                ->with(['details.product'])
+                ->lockForUpdate()
+                ->firstOrFail();
 
             if ($locked->status === OrderStatus::CLOSED || $locked->status === OrderStatus::CANCELLED) {
                 throw ValidationException::withMessages([
@@ -253,8 +261,13 @@ class OrderService
                 ]);
             }
 
-            return OrderPayment::query()->create([
+            $concept = filled($data['concept'] ?? null)
+                ? trim((string) $data['concept'])
+                : app(PaymentConceptSuggester::class)->suggest($locked, $amount, $remaining);
+
+            $payment = OrderPayment::query()->create([
                 'amount' => $amount,
+                'concept' => $concept,
                 'payment_method' => (int) $data['payment_method'],
                 'payment_date' => $data['payment_date'],
                 'operation_number' => filled($data['operation_number'] ?? null)
@@ -265,6 +278,8 @@ class OrderService
                 'created_by' => $author->id,
                 'updated_by' => $author->id,
             ]);
+
+            return $payment->fresh(['billingReference']) ?? $payment;
         });
     }
 
@@ -279,6 +294,13 @@ class OrderService
         if ($order->status === OrderStatus::CLOSED || $order->status === OrderStatus::CANCELLED) {
             throw ValidationException::withMessages([
                 'payment' => ['No se pueden eliminar pagos de un pedido cerrado o cancelado.'],
+            ]);
+        }
+
+        $payment->loadMissing('billingReference');
+        if ($payment->billingReference !== null) {
+            throw ValidationException::withMessages([
+                'payment' => ['No se puede eliminar un pago que ya tiene comprobante asociado.'],
             ]);
         }
 
@@ -343,6 +365,8 @@ class OrderService
                 ]);
             }
 
+            $previousStatus = $shipment->status;
+
             if ($status === ShipmentStatus::DELIVERED) {
                 // El envío SÍ puede llegar a DELIVERED con saldo pendiente.
                 // El pedido solo se cierra automáticamente si está totalmente pagado.
@@ -375,6 +399,13 @@ class OrderService
                 'status' => $status,
                 'updated_by' => $author->id,
             ]);
+
+            if (
+                $previousStatus !== ShipmentStatus::AT_DESTINATION
+                && $status === ShipmentStatus::AT_DESTINATION
+            ) {
+                event(new \App\Events\ShipmentArrivedAtDestination($shipment->fresh() ?? $shipment));
+            }
 
             return $this->find($locked->fresh());
         });
