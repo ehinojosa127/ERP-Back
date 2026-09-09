@@ -21,6 +21,7 @@ use App\Support\Orders\OrderStatus;
 use App\Support\Orders\ShipmentStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class OrderFlowTest extends TestCase
@@ -46,6 +47,10 @@ class OrderFlowTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        Http::fake([
+            'http://n8n.test/*' => Http::response(['ok' => true], 200),
+        ]);
 
         foreach (self::PERMISSIONS as $name) {
             Permission::query()->firstOrCreate(['name' => $name]);

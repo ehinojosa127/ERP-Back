@@ -243,7 +243,7 @@ class AutomationCustomerService
             ->select('orders.*')
             ->selectSub(Order::totalAmountSubquery(), 'total_amount')
             ->withSum('payments as paid_amount', 'amount')
-            ->with(['shipment', 'payments', 'details'])
+            ->with(['shipment', 'payments', 'details.product'])
             ->orderByDesc('order_date')
             ->orderByDesc('id');
     }

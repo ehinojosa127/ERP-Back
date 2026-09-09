@@ -16,6 +16,7 @@ use App\Support\Inventory\PaymentReceiptStorage;
 use App\Support\Inventory\PaymentStatus;
 use App\Support\Orders\FulfillmentType;
 use App\Support\Orders\OrderStatus;
+use App\Support\Orders\ShipmentReceiptStorage;
 use App\Support\Orders\ShipmentStatus;
 use App\Support\Query\ListQuery;
 use App\Support\Query\SearchablePaginator;
@@ -338,6 +339,34 @@ class OrderService
         return $order->shipment()->first();
     }
 
+    /**
+     * @return array{path: string, name: string, mime: string}
+     */
+    public function shipmentReceiptDownload(Order $order): array
+    {
+        $shipment = $order->shipment;
+
+        if ($shipment === null) {
+            throw ValidationException::withMessages([
+                'shipment' => ['El pedido no tiene un envío asociado.'],
+            ]);
+        }
+
+        $path = $shipment->getAttributes()['receipt_file_path'] ?? null;
+
+        if (! filled($path)) {
+            throw ValidationException::withMessages([
+                'shipment' => ['Este envío no tiene comprobante adjunto.'],
+            ]);
+        }
+
+        return [
+            'path' => $path,
+            'name' => $shipment->receipt_file_name ?? 'comprobante-envio',
+            'mime' => $shipment->receipt_file_mime ?? 'application/octet-stream',
+        ];
+    }
+
     public function updateShipmentStatus(Order $order, string $status, User $author): Order
     {
         return DB::transaction(function () use ($order, $status, $author) {
@@ -474,6 +503,7 @@ class OrderService
                 'destination' => $shipmentData['destination'],
                 'status' => ShipmentStatus::SHIPPED,
                 'agency_destination' => $shipmentData['agency_destination'],
+                ...(ShipmentReceiptStorage::store($shipmentData['receipt_file'] ?? null) ?? []),
                 'order_id' => $locked->id,
                 'created_by' => $author->id,
                 'updated_by' => $author->id,

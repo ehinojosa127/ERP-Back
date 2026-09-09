@@ -51,6 +51,12 @@ class UpdateOrderStatusRequest extends FormRequest
                 'string',
                 'max:255',
             ],
+            'shipment.receipt_file' => [
+                'nullable',
+                'file',
+                'mimes:pdf,jpg,jpeg,png,webp',
+                'max:5120',
+            ],
         ];
     }
 
@@ -65,6 +71,7 @@ class UpdateOrderStatusRequest extends FormRequest
             'shipment.shipping_key' => 'clave de envío',
             'shipment.destination' => 'destino',
             'shipment.agency_destination' => 'agencia destino',
+            'shipment.receipt_file' => 'comprobante de envío',
         ];
     }
 }

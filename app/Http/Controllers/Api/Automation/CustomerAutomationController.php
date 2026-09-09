@@ -56,12 +56,21 @@ class CustomerAutomationController extends ApiController
 
         return $this->success([
             'totalPending' => $balance['totalPending'],
-            'orders' => collect($balance['orders'])->map(fn ($order) => [
-                'orderNumber' => $order->order_number,
-                'total' => (float) $order->total_amount,
-                'paid' => (float) $order->paid_amount,
-                'balance' => (float) $order->remaining_amount,
-            ])->values()->all(),
+            'orders' => collect($balance['orders'])->map(function ($order) {
+                return [
+                    'orderNumber' => $order->order_number,
+                    'status' => $order->status,
+                    'total' => (float) $order->total_amount,
+                    'paid' => (float) $order->paid_amount,
+                    'balance' => (float) $order->remaining_amount,
+                    'details' => $order->details->map(fn ($detail) => [
+                        'name' => (string) $detail->display_name,
+                        'quantity' => (int) $detail->quantity,
+                        'unitPrice' => (float) $detail->unit_price,
+                        'subtotal' => (float) $detail->subtotal,
+                    ])->values()->all(),
+                ];
+            })->values()->all(),
         ]);
     }
 

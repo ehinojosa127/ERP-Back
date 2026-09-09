@@ -20,8 +20,10 @@ class ProductAutomationController extends ApiController
         $paginator = $this->products->list(
             $request->toListQuery(),
             $request->categoryId(),
+            $request->categoryName(),
             $request->minPrice(),
             $request->maxPrice(),
+            $request->attributeFilters(),
         );
 
         $paginator->through(
@@ -36,8 +38,10 @@ class ProductAutomationController extends ApiController
         $paginator = $this->products->list(
             $request->toListQuery(),
             $request->categoryId(),
+            $request->categoryName(),
             $request->minPrice(),
             $request->maxPrice(),
+            $request->attributeFilters(),
             availableOnly: true,
         );
 

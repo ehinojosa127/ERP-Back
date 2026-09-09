@@ -18,9 +18,20 @@ class Shipment extends Model
         'destination',
         'status',
         'agency_destination',
+        'receipt_file_path',
+        'receipt_file_name',
+        'receipt_file_mime',
         'order_id',
         'created_by',
         'updated_by',
+    ];
+
+    protected $appends = [
+        'has_receipt',
+    ];
+
+    protected $hidden = [
+        'receipt_file_path',
     ];
 
     protected function casts(): array
@@ -29,6 +40,12 @@ class Shipment extends Model
             'shipment_date' => 'date',
             'delivery_date' => 'date',
         ];
+    }
+
+    public function getHasReceiptAttribute(): bool
+    {
+        return filled($this->attributes['receipt_file_path'] ?? null)
+            || filled($this->attributes['receipt_file_name'] ?? null);
     }
 
     public function order(): BelongsTo

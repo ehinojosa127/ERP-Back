@@ -166,6 +166,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('orders/{order}/payments/{payment}/receipt', [OrderController::class, 'downloadPaymentReceipt']);
     Route::delete('orders/{order}/payments/{payment}', [OrderController::class, 'destroyPayment']);
     Route::get('orders/{order}/shipment', [OrderController::class, 'shipment']);
+    Route::get('orders/{order}/shipment/receipt', [OrderController::class, 'downloadShipmentReceipt']);
     Route::put('orders/{order}/shipment/status', [OrderController::class, 'updateShipmentStatus']);
     Route::get('orders/{order}/billing', [OrderBillingController::class, 'show']);
     Route::get('orders/{order}/billing/capabilities', [OrderBillingController::class, 'capabilities']);

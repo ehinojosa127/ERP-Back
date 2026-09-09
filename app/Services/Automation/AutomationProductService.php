@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Support\Query\ListQuery;
 use App\Support\Query\SearchablePaginator;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class AutomationProductService
@@ -17,11 +18,16 @@ class AutomationProductService
         'category.name',
     ];
 
+    /**
+     * @param  array<string, string>  $attributeFilters  nombre atributo => valor
+     */
     public function list(
         ListQuery $query,
         ?int $categoryId = null,
+        ?string $categoryName = null,
         ?float $minPrice = null,
         ?float $maxPrice = null,
+        array $attributeFilters = [],
         bool $availableOnly = false,
     ): LengthAwarePaginator {
         $builder = Product::query()
@@ -34,12 +40,29 @@ class AutomationProductService
             $builder->where('category_id', $categoryId);
         }
 
+        if ($categoryName !== null) {
+            $builder->whereHas(
+                'category',
+                fn (Builder $q) => $q->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($categoryName).'%']),
+            );
+        }
+
         if ($minPrice !== null) {
             $builder->where('sale_price', '>=', $minPrice);
         }
 
         if ($maxPrice !== null) {
             $builder->where('sale_price', '<=', $maxPrice);
+        }
+
+        foreach ($attributeFilters as $attributeName => $attributeValue) {
+            $builder->whereHas('details', function (Builder $q) use ($attributeName, $attributeValue) {
+                $q->whereRaw('LOWER(value) LIKE ?', ['%'.mb_strtolower($attributeValue).'%'])
+                    ->whereHas(
+                        'attribute',
+                        fn (Builder $aq) => $aq->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($attributeName).'%']),
+                    );
+            });
         }
 
         if ($availableOnly) {

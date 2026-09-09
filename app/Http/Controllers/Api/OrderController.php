@@ -107,9 +107,15 @@ class OrderController extends ApiController
             default => $this->permissionGate->assert($request, 'orders.update'),
         };
 
+        $data = $request->validated();
+        if ($request->hasFile('shipment.receipt_file')) {
+            $data['shipment'] = $data['shipment'] ?? [];
+            $data['shipment']['receipt_file'] = $request->file('shipment.receipt_file');
+        }
+
         $updated = $this->orderService->updateStatus(
             $order,
-            $request->validated(),
+            $data,
             $request->user(),
         );
 
@@ -222,6 +228,21 @@ class OrderController extends ApiController
         }
 
         return $this->success($shipment);
+    }
+
+    public function downloadShipmentReceipt(
+        Request $request,
+        Order $order,
+    ): \Symfony\Component\HttpFoundation\StreamedResponse {
+        $this->permissionGate->assert($request, 'orders.view');
+
+        $file = $this->orderService->shipmentReceiptDownload($order);
+
+        return \Illuminate\Support\Facades\Storage::disk('local')->download(
+            $file['path'],
+            $file['name'],
+            ['Content-Type' => $file['mime']],
+        );
     }
 
     public function updateShipmentStatus(
