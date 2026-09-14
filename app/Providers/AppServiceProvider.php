@@ -2,9 +2,13 @@
 
 namespace App\Providers;
 
+use App\Events\OrderPaymentConfirmed;
 use App\Events\OrderReadyForPickup;
+use App\Events\OrderShipped;
 use App\Events\ShipmentArrivedAtDestination;
+use App\Listeners\SendOrderPaymentConfirmedWebhook;
 use App\Listeners\SendOrderReadyForPickupWebhook;
+use App\Listeners\SendOrderShippedWebhook;
 use App\Listeners\SendShipmentAtDestinationWebhook;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -38,6 +42,11 @@ class AppServiceProvider extends ServiceProvider
         });
 
         Event::listen(
+            OrderShipped::class,
+            SendOrderShippedWebhook::class,
+        );
+
+        Event::listen(
             ShipmentArrivedAtDestination::class,
             SendShipmentAtDestinationWebhook::class,
         );
@@ -45,6 +54,11 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(
             OrderReadyForPickup::class,
             SendOrderReadyForPickupWebhook::class,
+        );
+
+        Event::listen(
+            OrderPaymentConfirmed::class,
+            SendOrderPaymentConfirmedWebhook::class,
         );
     }
 }

@@ -15,10 +15,8 @@ use App\Models\OrderPayment;
 use App\Services\Billing\OrderBillingService;
 use App\Services\Orders\OrderService;
 use App\Support\Auth\PermissionGate;
-use App\Events\OrderReadyForPickup;
 use App\Support\Billing\PaymentCondition;
 use App\Support\Orders\OrderStatus;
-use App\Support\Orders\ShipmentStatus;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -142,8 +140,6 @@ class OrderController extends ApiController
             $data['receipt_file'] = $request->file('receipt_file');
         }
 
-        $remainingBefore = (float) $order->remaining_amount;
-
         $payment = $this->orderService->createPayment(
             $order,
             $data,
@@ -172,13 +168,6 @@ class OrderController extends ApiController
         }
 
         $orderFresh = $this->orderService->find($order);
-        if (
-            $remainingBefore > 0.00001
-            && (float) $orderFresh->remaining_amount <= 0.00001
-            && $orderFresh->shipment?->status === ShipmentStatus::AT_DESTINATION
-        ) {
-            event(new OrderReadyForPickup($orderFresh));
-        }
 
         return $this->success([
             'payment' => $payment,

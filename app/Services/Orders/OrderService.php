@@ -2,6 +2,9 @@
 
 namespace App\Services\Orders;
 
+use App\Events\OrderPaymentConfirmed;
+use App\Events\OrderReadyForPickup;
+use App\Events\OrderShipped;
 use App\Models\Movement;
 use App\Models\Order;
 use App\Models\OrderDetail;
@@ -266,6 +269,8 @@ class OrderService
                 ? trim((string) $data['concept'])
                 : app(PaymentConceptSuggester::class)->suggest($locked, $amount, $remaining);
 
+            $remainingBefore = $remaining;
+
             $payment = OrderPayment::query()->create([
                 'amount' => $amount,
                 'concept' => $concept,
@@ -280,7 +285,21 @@ class OrderService
                 'updated_by' => $author->id,
             ]);
 
-            return $payment->fresh(['billingReference']) ?? $payment;
+            $payment = $payment->fresh(['billingReference', 'order.shipment', 'order.customer', 'order.payments', 'order.details'])
+                ?? $payment;
+
+            event(new OrderPaymentConfirmed($payment));
+
+            $orderFresh = $this->find($locked);
+            if (
+                $remainingBefore > 0.00001
+                && (float) $orderFresh->remaining_amount <= 0.00001
+                && $orderFresh->shipment?->status === ShipmentStatus::AT_DESTINATION
+            ) {
+                event(new OrderReadyForPickup($orderFresh));
+            }
+
+            return $payment;
         });
     }
 
@@ -532,7 +551,10 @@ class OrderService
                 'updated_by' => $author->id,
             ]);
 
-            return $this->find($locked->fresh());
+            $orderFresh = $this->find($locked->fresh());
+            event(new OrderShipped($orderFresh));
+
+            return $orderFresh;
         });
     }
 

@@ -109,24 +109,17 @@ class WebhookNotificationTest extends TestCase
         $shipment = $this->createShipmentAt(ShipmentStatus::AT_DESTINATION, paid: 40, unitPrice: 100);
         $order = $shipment->order;
         $admin = User::query()->orderBy('id')->firstOrFail();
-        $orderService = app(OrderService::class);
 
-        $remainingBefore = (float) $order->remaining_amount;
-        $orderService->createPayment($order, [
+        app(OrderService::class)->createPayment($order, [
             'amount' => 60,
             'payment_method' => PaymentMethod::YAPE,
             'payment_date' => now()->toDateString(),
         ], $admin);
 
-        $orderFresh = $orderService->find($order);
-        if (
-            $remainingBefore > 0.00001
-            && (float) $orderFresh->remaining_amount <= 0.00001
-            && $orderFresh->shipment?->status === ShipmentStatus::AT_DESTINATION
-        ) {
-            event(new OrderReadyForPickup($orderFresh));
-        }
-
+        $this->assertDatabaseHas('outbound_webhook_deliveries', [
+            'event' => 'PAYMENT_CONFIRMED',
+            'status' => 'delivered',
+        ]);
         $this->assertDatabaseHas('outbound_webhook_deliveries', [
             'event' => 'ORDER_READY_FOR_PICKUP',
             'status' => 'delivered',
@@ -159,6 +152,139 @@ class WebhookNotificationTest extends TestCase
                 && (float) ($payload['order']['balance'] ?? -1) === 0.0
                 && ($payload['shipment']['shippingKey'] ?? null) === '1234';
         });
+    }
+
+    public function test_order_shipped_fires_webhook(): void
+    {
+        Http::fake([
+            'http://n8n.test/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $admin = $this->createAdminUser();
+        $order = $this->createPreparingOrder(unitPrice: 100);
+
+        app(OrderService::class)->updateStatus($order, [
+            'status' => OrderStatus::SHIPPED,
+            'shipment' => [
+                'agency' => 'Shalom',
+                'shipment_date' => now()->toDateString(),
+                'delivery_date' => now()->addDays(2)->toDateString(),
+                'shipping_key' => '9876',
+                'destination' => 'Cusco',
+                'agency_destination' => 'Shalom Cusco',
+            ],
+        ], $admin);
+
+        $this->assertDatabaseHas('outbound_webhook_deliveries', [
+            'event' => 'ORDER_SHIPPED',
+            'status' => 'delivered',
+            'idempotency_key' => 'order_shipped:'.$order->id,
+        ]);
+
+        Http::assertSent(function ($request) {
+            $payload = json_decode($request->body(), true) ?: [];
+
+            return ($payload['event'] ?? null) === 'ORDER_SHIPPED'
+                && ($payload['shipment']['status'] ?? null) === ShipmentStatus::SHIPPED
+                && ($payload['shipment']['destination'] ?? null) === 'Cusco'
+                && array_key_exists('shippingKey', $payload['shipment'] ?? []);
+        });
+    }
+
+    public function test_payment_confirmed_fires_webhook(): void
+    {
+        Http::fake([
+            'http://n8n.test/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $admin = $this->createAdminUser();
+        $order = $this->createPreparingOrder(unitPrice: 100, paid: 0);
+
+        $payment = app(OrderService::class)->createPayment($order, [
+            'amount' => 40,
+            'concept' => 'Adelanto',
+            'payment_method' => PaymentMethod::YAPE,
+            'payment_date' => now()->toDateString(),
+            'operation_number' => 'OP-99',
+        ], $admin);
+
+        $this->assertDatabaseHas('outbound_webhook_deliveries', [
+            'event' => 'PAYMENT_CONFIRMED',
+            'status' => 'delivered',
+            'idempotency_key' => 'payment_confirmed:'.$payment->id,
+        ]);
+
+        Http::assertSent(function ($request) {
+            $payload = json_decode($request->body(), true) ?: [];
+
+            return ($payload['event'] ?? null) === 'PAYMENT_CONFIRMED'
+                && (float) ($payload['payment']['amount'] ?? 0) === 40.0
+                && ($payload['payment']['paymentMethodLabel'] ?? null) === 'Yape'
+                && ($payload['payment']['operationNumber'] ?? null) === 'OP-99'
+                && (float) ($payload['order']['balance'] ?? -1) === 60.0;
+        });
+    }
+
+    private function createPreparingOrder(float $unitPrice = 100, float $paid = 0): Order
+    {
+        $admin = $this->createAdminUser();
+        $customer = Customer::query()->create([
+            'name' => 'Maria',
+            'lastname' => 'Pérez',
+            'dni' => str_pad((string) random_int(1, 99999999), 8, '0', STR_PAD_LEFT),
+            'phone_number' => '51927882368',
+            'city' => 'Lima',
+        ]);
+
+        $category = Category::query()->create(['name' => 'Cat '.uniqid()]);
+        $product = Product::query()->create([
+            'name' => 'Traje marinera',
+            'sale_price' => $unitPrice,
+            'sku' => 'SKU-'.strtoupper(uniqid()),
+            'category_id' => $category->id,
+        ]);
+        Movement::query()->create([
+            'product_id' => $product->id,
+            'type' => MovementType::IN,
+            'quantity' => 5,
+            'unit_cost' => 20,
+            'movement_date' => now()->toDateString(),
+            'reference_type' => MovementReferenceType::PURCHASE,
+            'reference_id' => 1,
+        ]);
+
+        $order = Order::query()->create([
+            'order_number' => 'PED-'.str_pad((string) random_int(1, 99999), 5, '0', STR_PAD_LEFT),
+            'status' => OrderStatus::PREPARING,
+            'order_date' => now()->toDateString(),
+            'customer_id' => $customer->id,
+            'created_by' => $admin->id,
+            'updated_by' => $admin->id,
+        ]);
+
+        OrderDetail::query()->create([
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_name' => $product->name,
+            'quantity' => 1,
+            'unit_price' => $unitPrice,
+            'fulfillment_type' => FulfillmentType::STOCK,
+            'created_by' => $admin->id,
+            'updated_by' => $admin->id,
+        ]);
+
+        if ($paid > 0) {
+            OrderPayment::query()->create([
+                'order_id' => $order->id,
+                'amount' => $paid,
+                'payment_method' => PaymentMethod::YAPE,
+                'payment_date' => now()->toDateString(),
+                'created_by' => $admin->id,
+                'updated_by' => $admin->id,
+            ]);
+        }
+
+        return $order->fresh(['customer', 'details', 'payments']) ?? $order;
     }
 
     private function createShipmentAt(string $status, float $paid, float $unitPrice = 100): Shipment

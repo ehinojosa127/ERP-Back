@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\BillingGateway;
+use App\Events\OrderPaymentConfirmed;
 use App\Exceptions\Billing\BillingUnavailableException;
 use App\Exceptions\Billing\BillingValidationException;
 use App\Models\BillingEvent;
@@ -247,6 +248,10 @@ final class OrderBillingService
             'created_by' => $author->id,
             'updated_by' => $author->id,
         ]);
+
+        $payment = $payment->fresh(['order.customer', 'order.shipment', 'order.payments', 'order.details'])
+            ?? $payment;
+        event(new OrderPaymentConfirmed($payment));
 
         return $this->issueFromPayment($order, $payment, $kind, $author, $series, $paymentCondition);
     }
