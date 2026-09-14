@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\Automation\CustomerAutomationController;
 use App\Http\Controllers\Api\Automation\OrderAutomationController;
 use App\Http\Controllers\Api\Automation\ProductAutomationController;
+use App\Http\Controllers\Api\Automation\ShipmentAutomationController;
 use App\Http\Controllers\Api\BillingController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CustomerController;
@@ -38,6 +39,13 @@ Route::prefix('auth')->group(function () {
             ->middleware('permission:account.update');
     });
 });
+
+Route::prefix('automation')
+    ->middleware(['throttle:automation'])
+    ->group(function () {
+        // URL firmada temporal (WAHA/n8n no pueden mandar X-API-Key al fetch de media).
+        Route::get('shipments/{shipment}/receipt', [ShipmentAutomationController::class, 'receipt']);
+    });
 
 Route::prefix('automation')
     ->middleware([

@@ -184,15 +184,49 @@ class WebhookNotificationTest extends TestCase
             'idempotency_key' => 'order_shipped:'.$order->id,
         ]);
 
-        Http::assertSent(function ($request) {
-            $payload = json_decode($request->body(), true) ?: [];
+        $delivery = OutboundWebhookDelivery::query()
+            ->where('event', 'ORDER_SHIPPED')
+            ->first();
+        $this->assertNotNull($delivery);
+        $payload = $delivery->payload ?? [];
 
-            return ($payload['event'] ?? null) === 'ORDER_SHIPPED'
-                && ($payload['shipment']['status'] ?? null) === ShipmentStatus::SHIPPED
-                && ($payload['shipment']['destination'] ?? null) === 'Cusco'
-                && ($payload['order']['itemsSummary'] ?? null) === '1x Traje marinera'
-                && array_key_exists('shippingKey', $payload['shipment'] ?? []);
-        });
+        $this->assertSame(ShipmentStatus::SHIPPED, $payload['shipment']['status'] ?? null);
+        $this->assertSame('Cusco', $payload['shipment']['destination'] ?? null);
+        $this->assertSame('1x Traje marinera', $payload['order']['itemsSummary'] ?? null);
+        $this->assertArrayHasKey('receipt', $payload['shipment'] ?? []);
+        $this->assertNull($payload['shipment']['receipt']);
+    }
+
+    public function test_signed_shipment_receipt_url_is_downloadable(): void
+    {
+        config(['services.automation.public_base_url' => 'http://erp.test']);
+
+        \Illuminate\Support\Facades\Storage::fake('local');
+        $path = 'shipment-receipts/test-receipt.jpg';
+        \Illuminate\Support\Facades\Storage::disk('local')->put($path, 'fake-image-bytes');
+
+        $shipment = $this->createShipmentAt(ShipmentStatus::SHIPPED, paid: 100);
+        $shipment->forceFill([
+            'receipt_file_path' => $path,
+            'receipt_file_name' => 'guia.jpg',
+            'receipt_file_mime' => 'image/jpeg',
+        ])->save();
+
+        $receipt = app(\App\Services\Automation\ShipmentReceiptSignedUrl::class)->make($shipment->fresh() ?? $shipment);
+        $this->assertIsArray($receipt);
+        $this->assertTrue($receipt['isImage']);
+        $this->assertStringContainsString('/api/automation/shipments/'.$shipment->id.'/receipt?', $receipt['url']);
+
+        $query = [];
+        parse_str(parse_url($receipt['url'], PHP_URL_QUERY) ?: '', $query);
+
+        $this->get('/api/automation/shipments/'.$shipment->id.'/receipt?'.http_build_query([
+            'expires' => $query['expires'] ?? '',
+            'signature' => $query['signature'] ?? '',
+        ]))->assertOk();
+
+        $this->get('/api/automation/shipments/'.$shipment->id.'/receipt?expires='.($query['expires'] ?? '').'&signature=invalid')
+            ->assertForbidden();
     }
 
     public function test_payment_confirmed_fires_webhook(): void

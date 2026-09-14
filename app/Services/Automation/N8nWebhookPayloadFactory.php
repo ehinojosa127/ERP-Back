@@ -11,6 +11,10 @@ use Illuminate\Support\Collection;
 
 final class N8nWebhookPayloadFactory
 {
+    public function __construct(
+        private readonly ShipmentReceiptSignedUrl $receiptUrls,
+    ) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -183,6 +187,7 @@ final class N8nWebhookPayloadFactory
                 'shipmentDate' => null,
                 'deliveryDate' => null,
                 'shippingKey' => null,
+                'receipt' => null,
             ];
         }
 
@@ -194,6 +199,7 @@ final class N8nWebhookPayloadFactory
             'shipmentDate' => optional($shipment->shipment_date)?->toDateString(),
             'deliveryDate' => optional($shipment->delivery_date)?->toDateString(),
             'shippingKey' => $balance <= 0.00001 ? $shipment->shipping_key : null,
+            'receipt' => $this->receiptUrls->make($shipment),
         ];
     }
 
