@@ -3,9 +3,11 @@
 namespace App\Services\Automation;
 
 use App\Models\Order;
+use App\Models\OrderDetail;
 use App\Models\OrderPayment;
 use App\Models\Shipment;
 use App\Support\Inventory\PaymentMethod;
+use Illuminate\Support\Collection;
 
 final class N8nWebhookPayloadFactory
 {
@@ -14,7 +16,7 @@ final class N8nWebhookPayloadFactory
      */
     public function orderShipped(Order $order): array
     {
-        $order->loadMissing(['customer', 'shipment', 'payments', 'details']);
+        $order->loadMissing(['customer', 'shipment', 'payments', 'details.product']);
         $shipment = $order->shipment;
         $customer = $order->customer;
         $balance = (float) $order->remaining_amount;
@@ -22,12 +24,7 @@ final class N8nWebhookPayloadFactory
         return [
             'event' => 'ORDER_SHIPPED',
             'customer' => $this->customerPayload($customer?->name, $customer?->lastname, $customer?->phone_number),
-            'order' => [
-                'orderNumber' => $order->order_number,
-                'status' => $order->status,
-                'balance' => $balance,
-                'total' => (float) $order->total_amount,
-            ],
+            'order' => $this->orderPayload($order, $balance, includeTotal: true),
             'shipment' => $this->shipmentPayload($shipment, $balance),
         ];
     }
@@ -37,7 +34,7 @@ final class N8nWebhookPayloadFactory
      */
     public function shipmentAtDestination(Shipment $shipment): array
     {
-        $shipment->loadMissing(['order.customer', 'order.payments', 'order.details']);
+        $shipment->loadMissing(['order.customer', 'order.payments', 'order.details.product']);
         $order = $shipment->order;
         $customer = $order?->customer;
         $balance = $order !== null ? (float) $order->remaining_amount : 0.0;
@@ -45,11 +42,15 @@ final class N8nWebhookPayloadFactory
         return [
             'event' => 'SHIPMENT_AT_DESTINATION',
             'customer' => $this->customerPayload($customer?->name, $customer?->lastname, $customer?->phone_number),
-            'order' => [
-                'orderNumber' => $order?->order_number,
-                'status' => $order?->status,
-                'balance' => $balance,
-            ],
+            'order' => $order !== null
+                ? $this->orderPayload($order, $balance)
+                : [
+                    'orderNumber' => null,
+                    'status' => null,
+                    'balance' => $balance,
+                    'items' => [],
+                    'itemsSummary' => '',
+                ],
             'shipment' => $this->shipmentPayload($shipment, $balance),
         ];
     }
@@ -59,7 +60,7 @@ final class N8nWebhookPayloadFactory
      */
     public function orderReadyForPickup(Order $order): array
     {
-        $order->loadMissing(['customer', 'shipment', 'payments', 'details']);
+        $order->loadMissing(['customer', 'shipment', 'payments', 'details.product']);
         $shipment = $order->shipment;
         $customer = $order->customer;
         $balance = (float) $order->remaining_amount;
@@ -67,11 +68,7 @@ final class N8nWebhookPayloadFactory
         return [
             'event' => 'ORDER_READY_FOR_PICKUP',
             'customer' => $this->customerPayload($customer?->name, $customer?->lastname, $customer?->phone_number),
-            'order' => [
-                'orderNumber' => $order->order_number,
-                'status' => $order->status,
-                'balance' => $balance,
-            ],
+            'order' => $this->orderPayload($order, $balance),
             'shipment' => $this->shipmentPayload($shipment, $balance),
         ];
     }
@@ -81,7 +78,7 @@ final class N8nWebhookPayloadFactory
      */
     public function paymentConfirmed(OrderPayment $payment): array
     {
-        $payment->loadMissing(['order.customer', 'order.shipment', 'order.payments', 'order.details']);
+        $payment->loadMissing(['order.customer', 'order.shipment', 'order.payments', 'order.details.product']);
         $order = $payment->order;
         $customer = $order?->customer;
         $balance = $order !== null ? (float) $order->remaining_amount : 0.0;
@@ -90,12 +87,16 @@ final class N8nWebhookPayloadFactory
         return [
             'event' => 'PAYMENT_CONFIRMED',
             'customer' => $this->customerPayload($customer?->name, $customer?->lastname, $customer?->phone_number),
-            'order' => [
-                'orderNumber' => $order?->order_number,
-                'status' => $order?->status,
-                'balance' => $balance,
-                'total' => $order !== null ? (float) $order->total_amount : null,
-            ],
+            'order' => $order !== null
+                ? $this->orderPayload($order, $balance, includeTotal: true)
+                : [
+                    'orderNumber' => null,
+                    'status' => null,
+                    'balance' => $balance,
+                    'total' => null,
+                    'items' => [],
+                    'itemsSummary' => '',
+                ],
             'payment' => [
                 'id' => (int) $payment->id,
                 'amount' => (float) $payment->amount,
@@ -109,6 +110,63 @@ final class N8nWebhookPayloadFactory
                 ? $this->shipmentPayload($order->shipment, $balance)
                 : null,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function orderPayload(Order $order, float $balance, bool $includeTotal = false): array
+    {
+        $items = $this->itemsPayload($order->details);
+
+        $payload = [
+            'orderNumber' => $order->order_number,
+            'status' => $order->status,
+            'balance' => $balance,
+            'items' => $items,
+            'itemsSummary' => $this->itemsSummary($items),
+        ];
+
+        if ($includeTotal) {
+            $payload['total'] = (float) $order->total_amount;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  Collection<int, OrderDetail>|iterable<OrderDetail>  $details
+     * @return list<array{name: string, quantity: int, unitPrice: float, subtotal: float}>
+     */
+    private function itemsPayload(iterable $details): array
+    {
+        $items = [];
+
+        foreach ($details as $detail) {
+            $name = trim((string) ($detail->display_name ?: $detail->product_name));
+            $quantity = (int) $detail->quantity;
+            $unitPrice = (float) $detail->unit_price;
+
+            $items[] = [
+                'name' => $name !== '' ? $name : 'Producto',
+                'quantity' => $quantity,
+                'unitPrice' => $unitPrice,
+                'subtotal' => round($quantity * $unitPrice, 2),
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * @param  list<array{name: string, quantity: int, unitPrice: float, subtotal: float}>  $items
+     */
+    private function itemsSummary(array $items): string
+    {
+        return implode(', ', array_map(
+            static fn (array $item): string => $item['quantity'].'x '.$item['name'],
+            $items,
+        ));
     }
 
     /**

@@ -94,6 +94,9 @@ class WebhookNotificationTest extends TestCase
 
         $this->assertSame('SHIPMENT_AT_DESTINATION', $payload['event'] ?? null);
         $this->assertSame(60.0, (float) ($payload['order']['balance'] ?? -1));
+        $this->assertSame('1x Traje marinera', $payload['order']['itemsSummary'] ?? null);
+        $this->assertSame('Traje marinera', $payload['order']['items'][0]['name'] ?? null);
+        $this->assertSame(1, (int) ($payload['order']['items'][0]['quantity'] ?? 0));
         $this->assertArrayHasKey('shippingKey', $payload['shipment'] ?? []);
         $this->assertNull($payload['shipment']['shippingKey']);
 
@@ -187,6 +190,7 @@ class WebhookNotificationTest extends TestCase
             return ($payload['event'] ?? null) === 'ORDER_SHIPPED'
                 && ($payload['shipment']['status'] ?? null) === ShipmentStatus::SHIPPED
                 && ($payload['shipment']['destination'] ?? null) === 'Cusco'
+                && ($payload['order']['itemsSummary'] ?? null) === '1x Traje marinera'
                 && array_key_exists('shippingKey', $payload['shipment'] ?? []);
         });
     }
