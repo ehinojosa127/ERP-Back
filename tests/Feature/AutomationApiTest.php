@@ -124,6 +124,49 @@ class AutomationApiTest extends TestCase
         return $this->withHeader('X-API-Key', self::API_KEY);
     }
 
+    public function test_create_supplier_order_uses_default_supplier_when_omitted(): void
+    {
+        $defaultSupplier = \App\Models\Supplier::query()->create([
+            'name' => 'Por',
+            'lastname' => 'Asignar',
+            'company_name' => 'Por asignar '.uniqid(),
+            'ruc' => str_pad((string) random_int(1, 99999999999), 11, '0', STR_PAD_LEFT),
+            'dni' => str_pad((string) random_int(1, 99999999), 8, '0', STR_PAD_LEFT),
+            'phone_number' => '900000000',
+            'city' => 'Lima',
+        ]);
+        config(['services.automation.default_supplier_id' => $defaultSupplier->id]);
+
+        $customer = $this->createCustomer([
+            'phone_number' => PhoneNormalizer::canonical('955555555'),
+        ]);
+
+        $response = $this->withHeader('X-API-Key', self::API_KEY)
+            ->postJson('/api/automation/orders', [
+                'customer_id' => $customer->id,
+                'order_date' => now()->toDateString(),
+                'details' => [
+                    [
+                        'product_name' => 'Falda personalizada azul',
+                        'quantity' => 1,
+                        'unit_price' => 120,
+                        'fulfillment_type' => FulfillmentType::SUPPLIER,
+                    ],
+                ],
+            ]);
+
+        $response->assertCreated();
+        $orderId = (int) $response->json('data.id');
+
+        $this->assertDatabaseHas('order_details', [
+            'order_id' => $orderId,
+            'product_name' => 'Falda personalizada azul',
+            'fulfillment_type' => FulfillmentType::SUPPLIER,
+            'supplier_id' => $defaultSupplier->id,
+            'product_id' => null,
+        ]);
+    }
+
     private function createAdminUser(): User
     {
         $role = Role::query()->firstOrCreate(

@@ -11,6 +11,7 @@ use App\Models\OrderDetail;
 use App\Models\OrderPayment;
 use App\Models\Product;
 use App\Models\Shipment;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Services\Billing\PaymentConceptSuggester;
 use App\Support\Inventory\MovementReferenceType;
@@ -791,8 +792,15 @@ class OrderService
 
             if ($fulfillmentType === FulfillmentType::SUPPLIER) {
                 if ($supplierId === null) {
+                    $defaultSupplierId = config('services.automation.default_supplier_id');
+                    if ($defaultSupplierId !== null && $defaultSupplierId !== '') {
+                        $supplierId = (int) $defaultSupplierId;
+                    }
+                }
+
+                if ($supplierId !== null && ! Supplier::query()->whereKey($supplierId)->exists()) {
                     throw ValidationException::withMessages([
-                        'details' => ['Debe seleccionar un proveedor para productos enviados directamente por proveedor.'],
+                        'details' => ['El proveedor seleccionado no existe.'],
                     ]);
                 }
 

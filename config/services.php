@@ -47,6 +47,8 @@ return [
         'rate_limit_per_minute' => (int) env('AUTOMATION_RATE_LIMIT_PER_MINUTE', 120),
         // Base URL alcanzable por WAHA/n8n (ej. http://192.168.18.50:8000). Vacío = APP_URL.
         'public_base_url' => env('AUTOMATION_PUBLIC_BASE_URL', ''),
+        // Proveedor por defecto para líneas SUPPLIER sin supplier_id (WhatsApp / a pedido).
+        'default_supplier_id' => env('AUTOMATION_DEFAULT_SUPPLIER_ID'),
     ],
 
     'n8n' => [
