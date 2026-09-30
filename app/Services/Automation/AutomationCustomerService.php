@@ -38,10 +38,10 @@ class AutomationCustomerService
     /**
      * @return array{customer: Customer, orders: Collection<int, Order>, pendingBalance: float}
      */
-    public function summary(string $phone): array
+    public function summary(string $phone, bool $includeClosed = false): array
     {
         $customer = $this->findByPhone($phone);
-        $orders = $this->ordersQuery($customer)->get();
+        $orders = $this->ordersForCustomer($customer, $includeClosed);
 
         return [
             'customer' => $customer,
@@ -53,19 +53,23 @@ class AutomationCustomerService
     }
 
     /**
+     * Lista de pedidos para el bot. Por defecto solo abiertos
+     * (REGISTERED / PREPARING / SHIPPED); CLOSED y CANCELLED se omiten.
+     *
      * @return Collection<int, Order>
      */
-    public function orders(string $phone): Collection
+    public function orders(string $phone, bool $includeClosed = false): Collection
     {
         $customer = $this->findByPhone($phone);
 
-        return $this->ordersQuery($customer)->get();
+        return $this->ordersForCustomer($customer, $includeClosed);
     }
 
     public function orderByNumber(string $phone, string $orderNumber): Order
     {
         $customer = $this->findByPhone($phone);
 
+        // Detalle por número: incluye cerrados/cancelados (consulta puntual).
         $order = $this->ordersQuery($customer)
             ->where('order_number', $orderNumber)
             ->first();
@@ -78,14 +82,20 @@ class AutomationCustomerService
     }
 
     /**
+     * Saldo pendiente: pedidos con deuda, incluidos CLOSED.
+     * CANCELLED nunca entra (no generan saldo a cobrar).
+     *
      * @return array{totalPending: float, orders: Collection<int, Order>}
      */
     public function balance(string $phone): array
     {
-        $orders = $this->orders($phone)->filter(
-            fn (Order $order) => (float) $order->remaining_amount > 0.00001
-                && $order->status !== OrderStatus::CANCELLED,
-        )->values();
+        $customer = $this->findByPhone($phone);
+
+        $orders = $this->ordersQuery($customer)
+            ->where('status', '!=', OrderStatus::CANCELLED)
+            ->get()
+            ->filter(fn (Order $order) => (float) $order->remaining_amount > 0.00001)
+            ->values();
 
         return [
             'totalPending' => round((float) $orders->sum(
@@ -234,6 +244,20 @@ class AutomationCustomerService
         }
 
         return count(array_intersect($storedVariants, $incomingVariants)) > 0;
+    }
+
+    /**
+     * @return Collection<int, Order>
+     */
+    private function ordersForCustomer(Customer $customer, bool $includeClosed): Collection
+    {
+        $query = $this->ordersQuery($customer);
+
+        if (! $includeClosed) {
+            $query->whereNotIn('status', [OrderStatus::CLOSED, OrderStatus::CANCELLED]);
+        }
+
+        return $query->get();
     }
 
     private function ordersQuery(Customer $customer): Builder

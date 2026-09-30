@@ -10,6 +10,7 @@ use App\Http\Resources\Automation\AutomationOrderResource;
 use App\Http\Resources\Automation\AutomationShipmentResource;
 use App\Services\Automation\AutomationCustomerService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class CustomerAutomationController extends ApiController
@@ -25,9 +26,12 @@ class CustomerAutomationController extends ApiController
         return $this->success(new AutomationCustomerResource($customer));
     }
 
-    public function summary(string $phone): JsonResponse
+    public function summary(Request $request, string $phone): JsonResponse
     {
-        $summary = $this->customers->summary(urldecode($phone));
+        $summary = $this->customers->summary(
+            urldecode($phone),
+            $request->boolean('include_closed'),
+        );
 
         return $this->success([
             'customer' => new AutomationCustomerResource($summary['customer']),
@@ -36,9 +40,12 @@ class CustomerAutomationController extends ApiController
         ]);
     }
 
-    public function orders(string $phone): JsonResponse
+    public function orders(Request $request, string $phone): JsonResponse
     {
-        $orders = $this->customers->orders(urldecode($phone));
+        $orders = $this->customers->orders(
+            urldecode($phone),
+            $request->boolean('include_closed'),
+        );
 
         return $this->success(AutomationOrderResource::collection($orders));
     }

@@ -88,6 +88,62 @@ class AutomationApiTest extends TestCase
             ->assertJsonPath('data.order_balance', 0);
     }
 
+    public function test_orders_list_excludes_closed_and_cancelled_by_default(): void
+    {
+        $customer = $this->createCustomer(['phone_number' => PhoneNormalizer::canonical('933333333')]);
+        $admin = User::query()->orderBy('id')->firstOrFail();
+
+        $open = Order::query()->create([
+            'order_number' => 'PED-OPEN1',
+            'status' => OrderStatus::PREPARING,
+            'order_date' => now()->toDateString(),
+            'customer_id' => $customer->id,
+            'created_by' => $admin->id,
+            'updated_by' => $admin->id,
+        ]);
+        $closed = Order::query()->create([
+            'order_number' => 'PED-CLOSE',
+            'status' => OrderStatus::CLOSED,
+            'order_date' => now()->subDay()->toDateString(),
+            'customer_id' => $customer->id,
+            'created_by' => $admin->id,
+            'updated_by' => $admin->id,
+        ]);
+        $cancelled = Order::query()->create([
+            'order_number' => 'PED-CANCL',
+            'status' => OrderStatus::CANCELLED,
+            'order_date' => now()->subDays(2)->toDateString(),
+            'customer_id' => $customer->id,
+            'created_by' => $admin->id,
+            'updated_by' => $admin->id,
+        ]);
+
+        $list = $this->automation()
+            ->getJson('/api/automation/customers/by-phone/'.$customer->phone_number.'/orders')
+            ->assertOk()
+            ->json('data');
+
+        $numbers = collect($list)->pluck('order_number')->all();
+        $this->assertContains($open->order_number, $numbers);
+        $this->assertNotContains($closed->order_number, $numbers);
+        $this->assertNotContains($cancelled->order_number, $numbers);
+
+        $this->automation()
+            ->getJson('/api/automation/customers/by-phone/'.$customer->phone_number.'/orders/'.$closed->order_number)
+            ->assertOk()
+            ->assertJsonPath('data.order_number', $closed->order_number)
+            ->assertJsonPath('data.status', OrderStatus::CLOSED);
+
+        $withClosed = $this->automation()
+            ->getJson('/api/automation/customers/by-phone/'.$customer->phone_number.'/orders?include_closed=1')
+            ->assertOk()
+            ->json('data');
+
+        $withClosedNumbers = collect($withClosed)->pluck('order_number')->all();
+        $this->assertContains($closed->order_number, $withClosedNumbers);
+        $this->assertContains($cancelled->order_number, $withClosedNumbers);
+    }
+
     public function test_pdf_ownership_returns_404_for_other_customer(): void
     {
         Http::fake([
