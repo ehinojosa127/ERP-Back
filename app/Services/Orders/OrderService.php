@@ -5,6 +5,7 @@ namespace App\Services\Orders;
 use App\Events\OrderPaymentConfirmed;
 use App\Events\OrderReadyForPickup;
 use App\Events\OrderShipped;
+use App\Jobs\CancelStaleRegisteredOrderJob;
 use App\Models\Movement;
 use App\Models\Order;
 use App\Models\OrderDetail;
@@ -124,8 +125,9 @@ class OrderService
 
     public function create(array $data, User $author): Order
     {
-        return DB::transaction(function () use ($data, $author) {
+        $order = DB::transaction(function () use ($data, $author) {
             $details = $this->normalizeDetails($data['details'] ?? []);
+            $this->assertSufficientStock($details);
 
             $order = Order::query()->create([
                 'order_number' => $this->nextOrderNumber(),
@@ -141,6 +143,67 @@ class OrderService
 
             return $this->find($order->fresh());
         });
+
+        CancelStaleRegisteredOrderJob::dispatch($order->id)
+            ->delay(now()->addMinutes($this->registeredTtlMinutes()));
+
+        return $order;
+    }
+
+    /**
+     * Cancela un pedido si sigue en REGISTERED y ya superó el TTL.
+     * Usado por el job diferido y por el comando de red de seguridad.
+     */
+    public function cancelStaleRegisteredOrder(int $orderId): bool
+    {
+        $author = User::query()->orderBy('id')->first();
+        if ($author === null) {
+            return false;
+        }
+
+        return DB::transaction(function () use ($orderId, $author) {
+            $locked = Order::query()->whereKey($orderId)->lockForUpdate()->first();
+
+            if ($locked === null || $locked->status !== OrderStatus::REGISTERED) {
+                return false;
+            }
+
+            $expiresAt = $locked->created_at?->copy()->addMinutes($this->registeredTtlMinutes());
+            if ($expiresAt === null || $expiresAt->isFuture()) {
+                return false;
+            }
+
+            $this->cancelOrder($locked, $author);
+
+            return true;
+        });
+    }
+
+    /** @return int cantidad de pedidos cancelados */
+    public function expireStaleRegisteredOrders(): int
+    {
+        $cutoff = now()->subMinutes($this->registeredTtlMinutes());
+
+        $ids = Order::query()
+            ->where('status', OrderStatus::REGISTERED)
+            ->where('created_at', '<=', $cutoff)
+            ->orderBy('id')
+            ->pluck('id');
+
+        $cancelled = 0;
+
+        foreach ($ids as $orderId) {
+            if ($this->cancelStaleRegisteredOrder((int) $orderId)) {
+                $cancelled++;
+            }
+        }
+
+        return $cancelled;
+    }
+
+    private function registeredTtlMinutes(): int
+    {
+        return max(1, (int) config('services.orders.registered_ttl_minutes', 60));
     }
 
     public function update(Order $order, array $data, User $author): Order
@@ -171,6 +234,7 @@ class OrderService
 
             if (array_key_exists('details', $data)) {
                 $details = $this->normalizeDetails($data['details'] ?? []);
+                $this->assertSufficientStock($details, excludeOrderId: (int) $locked->id);
                 $locked->details()->delete();
                 $this->syncDetails($locked, $details, $author);
             }
@@ -511,7 +575,7 @@ class OrderService
                 ->where('order_id', $locked->id)
                 ->get();
 
-            $this->assertSufficientStock($details);
+            $this->assertSufficientStock($details, excludeOrderId: (int) $locked->id);
 
             $shipmentDate = $shipmentData['shipment_date'];
 
@@ -863,26 +927,44 @@ class OrderService
         }
     }
 
-    /** @param  \Illuminate\Support\Collection<int, OrderDetail>  $details */
-    private function assertSufficientStock($details): void
+    /**
+     * @param  \Illuminate\Support\Collection<int, OrderDetail>|array<int, array{
+     *     product_id: int|null,
+     *     product_name: string,
+     *     quantity: int,
+     *     fulfillment_type: string
+     * }>  $details
+     */
+    private function assertSufficientStock($details, ?int $excludeOrderId = null): void
     {
         $requiredByProduct = [];
 
         foreach ($details as $detail) {
-            if ($detail->fulfillment_type !== FulfillmentType::STOCK || $detail->product_id === null) {
+            $fulfillmentType = is_array($detail)
+                ? (string) ($detail['fulfillment_type'] ?? '')
+                : (string) $detail->fulfillment_type;
+            $productId = is_array($detail)
+                ? (isset($detail['product_id']) ? (int) $detail['product_id'] : null)
+                : ($detail->product_id !== null ? (int) $detail->product_id : null);
+            $quantity = is_array($detail)
+                ? (int) ($detail['quantity'] ?? 0)
+                : (int) $detail->quantity;
+            $name = is_array($detail)
+                ? (string) ($detail['product_name'] ?? '')
+                : (string) $detail->product_name;
+
+            if ($fulfillmentType !== FulfillmentType::STOCK || $productId === null) {
                 continue;
             }
-
-            $productId = (int) $detail->product_id;
 
             if (! isset($requiredByProduct[$productId])) {
                 $requiredByProduct[$productId] = [
                     'quantity' => 0,
-                    'name' => $detail->product_name,
+                    'name' => $name,
                 ];
             }
 
-            $requiredByProduct[$productId]['quantity'] += (int) $detail->quantity;
+            $requiredByProduct[$productId]['quantity'] += $quantity;
         }
 
         if ($requiredByProduct === []) {
@@ -892,7 +974,7 @@ class OrderService
         $products = Product::query()
             ->whereIn('id', array_keys($requiredByProduct))
             ->select('products.*')
-            ->selectSub(Product::stockSubquery(), 'stock')
+            ->selectSub(Product::stockSubquery($excludeOrderId), 'stock')
             ->get()
             ->keyBy('id');
 
@@ -909,8 +991,11 @@ class OrderService
 
         if ($insufficient !== []) {
             throw ValidationException::withMessages([
+                'details' => [
+                    'Stock insuficiente para: '.implode(', ', $insufficient).'.',
+                ],
                 'status' => [
-                    'El pedido no puede enviarse porque tiene productos sin stock suficiente: '.implode(', ', $insufficient).'.',
+                    'No hay stock suficiente ('.implode(', ', $insufficient).').',
                 ],
             ]);
         }

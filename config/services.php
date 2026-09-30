@@ -51,6 +51,11 @@ return [
         'default_supplier_id' => env('AUTOMATION_DEFAULT_SUPPLIER_ID'),
     ],
 
+    'orders' => [
+        // Pedidos REGISTERED se cancelan solos tras este TTL (minutos).
+        'registered_ttl_minutes' => max(1, (int) env('ORDER_REGISTERED_TTL_MINUTES', 60)),
+    ],
+
     'n8n' => [
         'webhook_url' => env('N8N_WEBHOOK_URL', ''),
         'webhook_secret' => env('N8N_WEBHOOK_SECRET', ''),

@@ -211,7 +211,7 @@ class OrderFlowTest extends TestCase
             ->assertJsonPath('data.status', OrderStatus::PREPARING);
     }
 
-    public function test_reject_ship_without_sufficient_stock(): void
+    public function test_reject_create_without_sufficient_available_stock(): void
     {
         $admin = $this->createAdminUser();
         $this->login($admin);
@@ -219,7 +219,7 @@ class OrderFlowTest extends TestCase
         $customer = $this->createCustomer();
         $product = $this->createProduct(stock: 1);
 
-        $orderId = $this->postJson('/api/orders', [
+        $this->postJson('/api/orders', [
             'customer_id' => $customer->id,
             'order_date' => now()->toDateString(),
             'details' => [
@@ -230,7 +230,91 @@ class OrderFlowTest extends TestCase
                     'fulfillment_type' => FulfillmentType::STOCK,
                 ],
             ],
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['details']);
+    }
+
+    public function test_stock_available_excludes_reserved_quantities(): void
+    {
+        $admin = $this->createAdminUser();
+        $this->login($admin);
+
+        $customer = $this->createCustomer();
+        $product = $this->createProduct(stock: 5);
+
+        $this->postJson('/api/orders', [
+            'customer_id' => $customer->id,
+            'order_date' => now()->toDateString(),
+            'details' => [
+                [
+                    'product_id' => $product->id,
+                    'quantity' => 3,
+                    'unit_price' => 20,
+                    'fulfillment_type' => FulfillmentType::STOCK,
+                ],
+            ],
+        ])->assertCreated();
+
+        $this->assertSame(2, (int) $product->fresh()->stock);
+
+        $this->postJson('/api/orders', [
+            'customer_id' => $customer->id,
+            'order_date' => now()->toDateString(),
+            'details' => [
+                [
+                    'product_id' => $product->id,
+                    'quantity' => 3,
+                    'unit_price' => 20,
+                    'fulfillment_type' => FulfillmentType::STOCK,
+                ],
+            ],
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['details']);
+
+        $this->postJson('/api/orders', [
+            'customer_id' => $customer->id,
+            'order_date' => now()->toDateString(),
+            'details' => [
+                [
+                    'product_id' => $product->id,
+                    'quantity' => 2,
+                    'unit_price' => 20,
+                    'fulfillment_type' => FulfillmentType::STOCK,
+                ],
+            ],
+        ])->assertCreated();
+
+        $this->assertSame(0, (int) $product->fresh()->stock);
+    }
+
+    public function test_reject_ship_without_sufficient_stock(): void
+    {
+        $admin = $this->createAdminUser();
+        $this->login($admin);
+
+        $customer = $this->createCustomer();
+        $product = $this->createProduct(stock: 5);
+
+        $orderId = $this->postJson('/api/orders', [
+            'customer_id' => $customer->id,
+            'order_date' => now()->toDateString(),
+            'details' => [
+                [
+                    'product_id' => $product->id,
+                    'quantity' => 3,
+                    'unit_price' => 20,
+                    'fulfillment_type' => FulfillmentType::STOCK,
+                ],
+            ],
         ])->assertCreated()->json('data.id');
+
+        // Simula stock físico insuficiente al enviar (p. ej. ajuste externo).
+        Movement::query()
+            ->where('product_id', $product->id)
+            ->where('type', MovementType::IN)
+            ->update(['quantity' => 1]);
 
         $this->postJson("/api/orders/{$orderId}/status", [
             'status' => OrderStatus::PREPARING,

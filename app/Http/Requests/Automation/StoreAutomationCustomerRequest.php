@@ -21,7 +21,13 @@ class StoreAutomationCustomerRequest extends FormRequest
             'ruc' => ['nullable', 'string', 'digits:11', Rule::unique('customers', 'ruc')],
             'legal_name' => ['nullable', 'string', 'max:255'],
             'address' => ['nullable', 'string', 'max:255'],
-            'phone_number' => ['required_without:phone', 'nullable', 'string', 'max:20'],
+            'phone_number' => [
+                'required_without:phone',
+                'nullable',
+                'string',
+                'max:20',
+                Rule::unique('customers', 'phone_number'),
+            ],
             'phone' => ['required_without:phone_number', 'nullable', 'string', 'max:20'],
             'city' => ['required', 'string', 'max:255'],
             'agency_destination' => ['nullable', 'string', 'max:255'],
@@ -32,6 +38,14 @@ class StoreAutomationCustomerRequest extends FormRequest
     {
         if ($this->filled('phone') && ! $this->filled('phone_number')) {
             $this->merge(['phone_number' => $this->input('phone')]);
+        }
+
+        if ($this->filled('phone_number')) {
+            $this->merge([
+                'phone_number' => \App\Support\Customers\PhoneNormalizer::canonical(
+                    (string) $this->input('phone_number'),
+                ),
+            ]);
         }
     }
 }

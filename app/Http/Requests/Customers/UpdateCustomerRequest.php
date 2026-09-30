@@ -27,9 +27,25 @@ class UpdateCustomerRequest extends FormRequest
             ],
             'legal_name' => ['nullable', 'string', 'max:255'],
             'address' => ['nullable', 'string', 'max:255'],
-            'phone_number' => ['required', 'string', 'digits_between:6,15'],
+            'phone_number' => [
+                'required',
+                'string',
+                'digits_between:6,15',
+                Rule::unique('customers', 'phone_number')->ignore($this->route('customer')?->id),
+            ],
             'city' => ['required', 'string', 'max:255'],
             'agency_destination' => ['nullable', 'string', 'max:255'],
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if ($this->filled('phone_number')) {
+            $this->merge([
+                'phone_number' => \App\Support\Customers\PhoneNormalizer::canonical(
+                    (string) $this->input('phone_number'),
+                ),
+            ]);
+        }
     }
 }
