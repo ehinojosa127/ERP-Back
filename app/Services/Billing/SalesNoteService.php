@@ -142,7 +142,13 @@ final class SalesNoteService
 
     private function nextNumber(): int
     {
-        $last = SalesNote::query()->where('series', self::SERIES)->lockForUpdate()->max('number');
+        // PostgreSQL no permite FOR UPDATE con agregados (max()).
+        // Bloqueamos la última fila de la serie y sumamos 1.
+        $last = SalesNote::query()
+            ->where('series', self::SERIES)
+            ->orderByDesc('number')
+            ->lockForUpdate()
+            ->value('number');
 
         return ((int) $last) + 1;
     }
