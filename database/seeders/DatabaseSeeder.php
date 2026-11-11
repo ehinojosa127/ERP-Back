@@ -38,6 +38,11 @@ class DatabaseSeeder extends Seeder
 
         $userRole->permissions()->sync($userPermissionIds);
 
+        // Las cuentas de demostración nunca deben crearse en producción.
+        if (! app()->environment(['local', 'testing'])) {
+            return;
+        }
+
         User::query()->firstOrCreate(
             ['email' => 'admin@example.com'],
             [

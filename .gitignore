@@ -25,3 +25,6 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Credenciales privadas generadas para el reinicio del ERP
+/database/maintenance/admin-credentials.txt

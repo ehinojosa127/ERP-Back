@@ -4,9 +4,10 @@ namespace App\Support\Query;
 
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 /**
- * Búsqueda y paginación compartidas por todos los listados.
+ * Búsqueda sin distinción de mayúsculas/minúsculas y paginación de los listados.
  *
  * Las columnas admiten notación de relación ("role.name"), de modo que un
  * módulo puede buscar también por campos de sus relaciones sin escribir su
@@ -18,7 +19,7 @@ final class SearchablePaginator
 
     /**
      * @param  array<int, string>  $searchableColumns
-     * @return LengthAwarePaginator<int, \Illuminate\Database\Eloquent\Model>
+     * @return LengthAwarePaginator<int, Model>
      */
     public static function paginate(
         Builder $builder,
@@ -43,7 +44,7 @@ final class SearchablePaginator
         $builder->where(function (Builder $grouped) use ($term, $columns) {
             foreach ($columns as $column) {
                 if (! str_contains($column, self::RELATION_SEPARATOR)) {
-                    $grouped->orWhere($column, 'like', $term);
+                    $grouped->orWhereLike($column, $term, caseSensitive: false);
 
                     continue;
                 }
@@ -52,7 +53,7 @@ final class SearchablePaginator
 
                 $grouped->orWhereHas(
                     $relation,
-                    fn (Builder $related) => $related->where($relatedColumn, 'like', $term),
+                    fn (Builder $related) => $related->whereLike($relatedColumn, $term, caseSensitive: false),
                 );
             }
         });

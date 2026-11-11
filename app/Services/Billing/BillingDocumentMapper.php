@@ -34,7 +34,7 @@ final class BillingDocumentMapper
             throw new BillingValidationException('El monto del pago debe ser mayor a cero para emitir.');
         }
 
-        $unitValue = round($amount / 1.18, 6);
+        [$unitValue, $taxAffectation] = $this->priceAndAffectation($amount, $kind);
         $items = [[
             'code' => 'PAY-'.$payment->id,
             'description' => $concept,
@@ -43,7 +43,7 @@ final class BillingDocumentMapper
             'unitValue' => $unitValue,
             'taxInclusiveUnitPrice' => $amount,
             'discount' => 0,
-            'taxAffectation' => '10',
+            'taxAffectation' => $taxAffectation,
         ]];
 
         return [
@@ -88,7 +88,7 @@ final class BillingDocumentMapper
         }
 
         $recipient = $this->mapRecipient($customer, $kind);
-        $items = $this->mapItems($order);
+        $items = $this->mapItems($order, $kind);
 
         return [
             'series' => $series,
@@ -159,12 +159,12 @@ final class BillingDocumentMapper
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function mapItems(Order $order): array
+    public function mapItems(Order $order, string $kind = DocumentKind::RECEIPT): array
     {
         $items = [];
         foreach ($order->details as $detail) {
             $unitPrice = round((float) $detail->unit_price, 2);
-            $unitValue = round($unitPrice / 1.18, 6);
+            [$unitValue, $taxAffectation] = $this->priceAndAffectation($unitPrice, $kind);
             $items[] = [
                 'code' => $detail->product_id ? (string) $detail->product_id : null,
                 'description' => $this->itemDescription($detail),
@@ -173,7 +173,7 @@ final class BillingDocumentMapper
                 'unitValue' => $unitValue,
                 'taxInclusiveUnitPrice' => $unitPrice,
                 'discount' => 0,
-                'taxAffectation' => '10',
+                'taxAffectation' => $taxAffectation,
             ];
         }
 
@@ -192,5 +192,20 @@ final class BillingDocumentMapper
         }
 
         return 'Ítem';
+    }
+
+    /**
+     * RUS/NRUS no lleva IGV: boletas van exoneradas (catálogo 07 = 20).
+     * Facturas (régimen general) van gravadas (10).
+     *
+     * @return array{0: float, 1: string}
+     */
+    private function priceAndAffectation(float $taxInclusiveAmount, string $kind): array
+    {
+        if ($kind === DocumentKind::RECEIPT) {
+            return [round($taxInclusiveAmount, 6), '20'];
+        }
+
+        return [round($taxInclusiveAmount / 1.18, 6), '10'];
     }
 }
